@@ -52,12 +52,9 @@ public:
 };
 
 class TCPClient: public TCPHolder {
-    virtual void acceptor(int fd, address_t address) = 0;
-    int fdS = -1;
-
 public:
     TCPClient(char *ip, int port) : TCPHolder(ip, port) {}
-    void openConnection();
+    int openConnection();
 };
 
 #endif
