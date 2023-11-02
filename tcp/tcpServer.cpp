@@ -16,13 +16,13 @@ void TCPServer::bindAddress() {
         throw TCPError("socket creation failed");
     }
     if (address.ip.sa_family == AF_INET) {
-        if (bind(fdS, (const sockaddr *) &address.ip, sizeof(struct sockaddr_in)) != 0) {
+        if (bind(fdS, static_cast<struct sockaddr*>(&address.ip), sizeof(struct sockaddr_in)) != 0) {
             throw TCPError(strerror(errno));
         }
         return;
     }
     if (address.ip.sa_family == AF_INET6) {
-        if (bind(fdS, (const sockaddr *) &address.ip, sizeof(struct sockaddr_in6)) != 0) {
+        if (bind(fdS, static_cast<struct sockaddr*>(&address.ip), sizeof(struct sockaddr_in6)) != 0) {
             throw TCPError(strerror(errno));
         }
         return;

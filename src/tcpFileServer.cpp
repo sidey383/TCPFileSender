@@ -73,7 +73,7 @@ private:
         int out = open(name, O_WRONLY | O_CREAT | O_TRUNC);
 
         if (out < 0) {
-            fprintf(stderr, "[%d] File open error: %s", getpid(), strerror(out));
+            fprintf(stderr, "[%d] File open error: %s\n", getpid(), strerror(out));
             return;
         }
 
@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
         server.bindAddress();
         server.startLister();
     } catch (TCPError &e) {
-        std::cerr << "TCP error: " << e.what();
+        std::cerr << "TCP error: " << e.what() << "\n";
     }
 
 }

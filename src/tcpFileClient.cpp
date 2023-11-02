@@ -101,7 +101,7 @@ public:
                 bites += readed;
                 gettimeofday(&stop, NULL);
             }
-            printf("Speed: %llu Kb/s\n", bites * 1000000 / ( getMs(&start, &stop) * 1024 ));
+            printf("Complete: %d%% Speed: %llu Kb/s\n", size * 100 /fSize , bites * 1000000 / ( getMs(&start, &stop) * 1024 ));
         }
         struct timeval globalEnd;
         gettimeofday(&globalEnd, NULL);

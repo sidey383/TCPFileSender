@@ -9,12 +9,12 @@ std::string toString(address_t address) {
     char buf[128];
     std::stringstream ss;
     if (address.ip.sa_family == AF_INET6) {
-        if (inet_ntop(AF_INET6, (const void *) &(address.ipv6.sin6_addr), buf, 128) == nullptr)
+        if (inet_ntop(AF_INET6, static_cast<void*>(&(address.ipv6.sin6_addr)), buf, 128) == nullptr)
             return "";
         ss << buf << ":" << ntohs(address.ipv6.sin6_port);
     }
     if (address.ip.sa_family == AF_INET) {
-        if (inet_ntop(AF_INET, (const void *) &(address.ipv4.sin_addr), buf, 128) == nullptr)
+        if (inet_ntop(AF_INET, static_cast<void*>(&(address.ipv4.sin_addr)), buf, 128) == nullptr)
             return "";
         ss << buf << ":" << ntohs(address.ipv4.sin_port);
     }
