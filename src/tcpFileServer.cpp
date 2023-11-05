@@ -1,27 +1,11 @@
+#include "tcpFileServer.hpp"
 #include <cstring>
-#include <cstdlib>
 #include <iostream>
 #include <unistd.h>
 #include <fcntl.h>
-#include "../tcp/tcp.h"
 #include <sys/time.h>
 #include <sys/stat.h>
-#include "tcpFileProtocol.hpp"
-
-#define BUF_SIZE 1048576
-#define TIME_TO_UPDATE 3000000
-
-typedef struct {
-    int port;
-    char *ip;
-    int help;
-} args;
-
-
-unsigned long getMs(struct timeval *start, struct timeval *end) {
-    return ((end->tv_sec - start->tv_sec) * 1000000 + end->tv_usec - start->tv_usec);
-}
-
+#include "timeUtil.hpp"
 
 class ConnectionAcceptor {
 private:
@@ -78,10 +62,8 @@ private:
             gettimeofday(&start, nullptr);
             gettimeofday(&stop, nullptr);
             size_t periodRead = 0;
-            while (getMs(&start, &stop) < TIME_TO_UPDATE && totalRead < header.fileSize) {
-                size_t curRead = recv(socket, buf,
-                                      header.fileSize - totalRead > BUF_SIZE ? BUF_SIZE : header.fileSize - totalRead,
-                                      0);
+            while (getMicroseconds(&start, &stop) < TIME_TO_UPDATE && totalRead < header.fileSize) {
+                size_t curRead = recv(socket, buf, header.fileSize - totalRead > BUF_SIZE ? BUF_SIZE : header.fileSize - totalRead, 0);
                 if (curRead == 0)
                     throw ConnectionException("Connection closed");
                 if (curRead == -1)
@@ -102,33 +84,31 @@ private:
                 gettimeofday(&stop, nullptr);
             }
             std::cout << "[" << getpid() << "] "
-                      << "Status " << totalRead * 100 / header.fileSize << "% at " << stop.tv_sec - globalStart.tv_sec
-                      << " sec\n"
+                      << "Status " << totalRead * 100 / header.fileSize << "% at "
+                      << getTimeDifStr(&globalStart, &stop) << " sec\n"
                       << "Total speed: "
-                      << (double) totalRead * 1000000.0 / ((double) getMs(&globalStart, &stop) * 1024)
-                      << "Kb/s\n"
+                      << getSpeedStr(totalRead, &globalStart, &stop) << "\n"
                       << "Current speed: "
-                      << (double) periodRead * 1000000.0 / ((double) getMs(&start, &stop) * 1024)
-                      << "Kb/s\n\n";
+                      << getSpeedStr(periodRead, &globalStart, &stop) << "\n\n";
         }
-        struct timeval globalEnd{};
-        gettimeofday(&globalEnd, nullptr);
-        std::cout << "[" << getpid() << "] "
-                  << "Complete all\n\n";
         return 1;
     }
 
     int sendStatus(int status) {
         try {
+            std::cout << "[" << getpid() << "] Send status " << status << "\n";
+            std::flush(std::cout);
             sendSocket(socket, &status, sizeof(int));
             return 1;
         } catch (ConnectionException &e) {
-            std::cerr << "[" << getpid() << "] Send header status error: " << e.what();
+            std::cerr << "[" << getpid() << "] Send header status error: " << e.what() << "\n";
             return 0;
         }
     }
 
     int openFile() {
+        struct timeval stop{}, start{};
+        gettimeofday(&start, nullptr);
         struct stat dirStat{};
         if (stat("uploads", &dirStat) != 0) {
             if (mkdir("uploads", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
@@ -141,6 +121,9 @@ private:
                 return STATUS_INTERNAL_ERROR;
             }
         }
+        gettimeofday(&stop, nullptr);
+        std::cout << "Read stats in " + getTimeDifStr(&start, &stop) << "\n";
+        gettimeofday(&start, nullptr);
         std::string path = "uploads/";
         path += header.fileName;
         file = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
@@ -148,6 +131,8 @@ private:
             std::cerr << "[" << getpid() << "] File open error: " << strerror(errno) << "\n";
             return 0;
         }
+        gettimeofday(&stop, nullptr);
+        std::cout << "Open file in " + getTimeDifStr(&start, &stop) << "\n";
         return STATUS_OK;
     }
 
@@ -159,91 +144,47 @@ public:
         try {
             status = readHeader();
         } catch (ConnectionException &e) {
-            std::cerr << "[" << getpid() << "] Read header error: " << e.what()  << "\n";
+            std::cerr << "[" << getpid() << "] Read header error: " << e.what() << "\n";
             return;
         }
         if (status != STATUS_OK) {
             sendStatus(status);
             return;
         }
+        std::cout << "[" << getpid() << "] Receive file load request: " << header.fileSize << " " << header.fileName
+                  << "\n";
         status = openFile();
-        if(!sendStatus(status)) {
+        if (!sendStatus(status)) {
             close(file);
             return;
         }
         try {
+            std::cout << "[" << getpid() << "] Start read file\n";
             if (readFile()) {
+                std::cout <<  "[" << getpid() << "] Success receive file\n";
                 sendStatus(STATUS_OK);
             } else {
+                std::cout <<  "[" << getpid() << "] Receive file error\n";
                 sendStatus(STATUS_INTERNAL_ERROR);
             }
         } catch (ConnectionException &e) {
             std::cerr << "[" << getpid() << "] Read file error: " << e.what() << "\n";
-            close(file);
-            return;
         }
         close(file);
     }
 };
 
-class FileTCPServer : public TCPServer {
-    struct timeval timeout;
-private:
-    void acceptor(int in, address_t address) override {
-        std::cout << "[" << getpid() << "] Accept connection from " << toString(address) << "\n";
-        //setSocketOptions(in, timeout);
-        ConnectionAcceptor connectionAcceptor = ConnectionAcceptor(in);
-        connectionAcceptor.acceptFile();
-    }
+void FileTCPServer::acceptor(int in, address_t address) {
+    std::cout << "[" << getpid()
+              << "] Accept connection from " << toString(address)
+              << "\n";
 
-public:
-    FileTCPServer(char *ip, int port) : TCPServer(ip, port), timeout({1, 0}) {}
-
-    FileTCPServer(char *ip, int port, struct timeval timeout) : TCPServer(ip, port), timeout(timeout) {}
-};
-
-char defaultIP[] = "127.0.0.1";
-
-void parseArgs(int argc, char **argv, args *args) {
-    args->help = 0;
-    args->ip = defaultIP;
-    args->port = DEFAULT_PORT;
-    for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) {
-            i++;
-            if (i < argc) {
-                args->port = (int) strtol(argv[i], nullptr, 10);
-            }
-        }
-        if (strcmp(argv[i], "-ip") == 0) {
-            i++;
-            if (i < argc) {
-                args->ip = argv[i];
-            }
-        }
-        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-            args->help = 1;
-        }
-    }
+    setSocketTimeout(in, timeout);
+    ConnectionAcceptor connectionAcceptor = ConnectionAcceptor(in);
+    connectionAcceptor.acceptFile();
 }
 
-int main(int argc, char **argv) {
-    args args;
-    parseArgs(argc, argv, &args);
-    if (args.help) {
-        std::cout <<
-                  "-p --port <port> server port\n" <<
-                  "-ip <ip> server ip\n" <<
-                  "-h --help show this message\n";
-        return 0;
-    }
-    try {
-        FileTCPServer server = FileTCPServer(args.ip, args.port);
-        std::cout << server.getAddressString() << "\n";
-        server.bindAddress();
-        server.startLister();
-    } catch (TCPError &e) {
-        std::cerr << "TCP error: " << e.what() << "\n";
-    }
+FileTCPServer::FileTCPServer(char *ip, int port) : TCPServer(ip, port), timeout({1, 0}) {}
 
-}
+FileTCPServer::FileTCPServer(char *ip, int port, struct timeval timeout) : TCPServer(ip, port), timeout(timeout) {}
+
