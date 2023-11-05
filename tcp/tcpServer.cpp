@@ -8,7 +8,10 @@
 
 #define MAX_CONNECTION 10
 
-
+TCPServer::~TCPServer() {
+    if (fdS > 0)
+        close(fdS);
+}
 
 void TCPServer::bindAddress() {
     fdS = socket(AF_INET, SOCK_STREAM, 0);

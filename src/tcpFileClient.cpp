@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include "../tcp/tcp.h"
 #include <sys/time.h>
+#include <sys/stat.h>
+#include "tcpFileProtocol.hpp"
 
 #define BUF_SIZE 1048576
 
@@ -18,66 +20,119 @@ typedef struct {
     int help;
 } args;
 
-unsigned long getMs(struct timeval* start, struct timeval* end) {
+#define FILE_SIZE_OK 0
+#define FILE_SIZE_ERROR -1
+#define FILE_SIZE_NOT_FILE -2
+
+unsigned long getMs(struct timeval *start, struct timeval *end) {
     return ((end->tv_sec - start->tv_sec) * 1000000 + end->tv_usec - start->tv_usec);
 }
 
-int getFileSize(char *filename, size_t* size) {
-    FILE *fp = fopen(filename, "r");
-    if (fp == NULL)
-        return -1;
-    if (fseek(fp, 0, SEEK_END) < 0) {
-        fclose(fp);
-        return -1;
+int getFileSize(char *filename, __off_t *size) {
+    struct stat fStat{};
+    if (stat(filename, &fStat) == -1) {
+        return FILE_SIZE_ERROR;
     }
-    *size = ftell(fp);
-    fclose(fp);
-    return 0;
+    if (S_ISREG(fStat.st_mode)) {
+        (*size) = fStat.st_size;
+        return FILE_SIZE_OK;
+    }
+    return FILE_SIZE_NOT_FILE;
 }
 
-void writeBig(int fd, void* data, size_t size) {
-    size_t writed = 0;
-    while (writed < size) {
-        ssize_t w = write(fd, ((char*)data) + writed, size - writed);
-        if (w < 0) {
-            std::cerr << "Write error: " << strerror(errno);
-            exit(0);
-        }
-        writed += w;
-    }
+void receiveServerStatus(int fd, int *status) {
+    readSocket(fd, status, sizeof(int));
 }
 
 class FileTCPClient : public TCPClient {
+    struct timeval timeout;
 public:
-    FileTCPClient(char *ip, int port) : TCPClient(ip, port) {}
+
+    FileTCPClient(char *ip, int port, struct timeval timeout) : TCPClient(ip, port), timeout(timeout) {}
+
+    FileTCPClient(char *ip, int port) : TCPClient(ip, port), timeout({1, 0}) {}
 
     void sendFile(char *fName, char *sendName) {
         size_t fSize;
-        int err = getFileSize(fName, &fSize);
-        if (err != 0) {
-            std::cout<<"File open error\n";
+        __off_t originSize;
+        int err = getFileSize(fName, &originSize);
+        if (err != FILE_SIZE_OK) {
+            if (err == FILE_SIZE_ERROR)
+                std::cout << "File size read error: " << strerror(errno) << "\n";
+            if (err == FILE_SIZE_NOT_FILE)
+                std::cout << "Not file: " << fName << "\n";
             return;
         }
+        fSize = originSize;
         int file = open(fName, O_RDONLY);
         if (file < 0) {
-            std::cerr << "File open error: " << strerror(file);
+            std::cerr << "File open error: " << strerror(file) << "\n";
             return;
         }
-        std::cout<<"Open file\n";
+        std::cout << "Open file\n";
         int fd = openConnection();
         if (fd < 0) {
-            std::cerr << "Connect error: " << strerror(fd);
+            std::cerr << "Connect error: " << strerror(errno) << "\n";
+            close(file);
             return;
         }
-        std::cout<<"Open connection\n";
-        size_t headerSize = strlen(sendName);
-        write(fd, &headerSize, sizeof(headerSize));
-        write(fd, sendName, headerSize);
-        printf("Write name %s\n", sendName);
+        setSocketTimeout(fd, timeout);
+        std::cout << "Open connection\n";
+        char sendNameRes[NAME_SIZE];
+        strcpy(sendNameRes, sendName);
+        try {
+            sendSocket(fd, sendNameRes, NAME_SIZE);
+        } catch (ConnectionException &e) {
+            std::cerr << "Send file name error: " << e.what() << "\n";
+            close(file);
+            close(fd);
+            return;
+        }
 
-        write(fd, &fSize, sizeof(fSize));
-        printf("Write file size %llu\n", fSize);
-        fsync(fd);
+        std::cout << "Write name " << sendNameRes << "\n";
+
+        try {
+            sendSocket(fd, &fSize, sizeof(fSize));
+        } catch (ConnectionException &e) {
+            std::cerr << "Send file size error: " << e.what() << "\n";
+            close(file);
+            close(fd);
+            return;
+        }
+        std::cout << "Write file size " << fSize << "\n";
+        int serverStatus;
+        try {
+            receiveServerStatus(fd, &serverStatus);
+        } catch (ConnectionException &e) {
+            std::cerr << "Header status receive error: " << e.what() << "\n";
+            close(file);
+            close(fd);
+            return;
+        }
+        switch (serverStatus) {
+            case STATUS_INTERNAL_ERROR:
+                std::cerr << "Server internal error\n";
+                close(file);
+                close(fd);
+                return;
+            case STATUS_WRONG_PATH:
+                std::cerr << "Wrong file path\n";
+                close(file);
+                close(fd);
+                return;
+            case STATUS_FILE_TOO_LONG:
+                std::cerr << "File too long\n";
+                close(file);
+                close(fd);
+                return;
+            case STATUS_OK:
+                break;
+            default:
+                std::cerr << "Unknown status: " << serverStatus << "\n";
+                close(file);
+                close(fd);
+                return;
+        }
 
         char buf[BUF_SIZE];
         long size = 0;
@@ -91,21 +146,49 @@ public:
             ssize_t bites = 0;
             while (getMs(&start, &stop) < TIME_TO_UPDATE && size < fSize) {
                 size_t readed = read(file, buf, BUF_SIZE);
-                if (readed < 0) {
-                    perror("Read error");
-                    exit(0);
+                try {
+                    sendSocket(fd, buf, readed);
+                } catch (ConnectionException &e) {
+                    std::cerr << "File data write error: " << e.what() << "\n";
+                    close(file);
+                    close(fd);
+                    return;
                 }
-                writeBig(fd, buf, readed);
-                fsync(fd);
                 size += readed;
                 bites += readed;
                 gettimeofday(&stop, NULL);
+                fsync(fd);
             }
-            printf("Complete: %d%% Speed: %llu Kb/s\n", size * 100 /fSize , bites * 1000000 / ( getMs(&start, &stop) * 1024 ));
+            std::cout << "Status: " << size * 100 / fSize << "% loaded Speed: "
+                      << bites * 1000000 / (getMs(&start, &stop) * 1024) << "kB/s\n";
         }
         struct timeval globalEnd;
         gettimeofday(&globalEnd, NULL);
-        printf("Complete in: %llu ms\n", getMs(&globalStart, &globalEnd));
+        try {
+            receiveServerStatus(fd, &serverStatus);
+        } catch (ConnectionException &e) {
+            std::cerr << "Send status receive error: " << e.what() << "\n";
+            close(file);
+            close(fd);
+            return;
+        }
+        switch (serverStatus) {
+            case STATUS_INTERNAL_ERROR:
+                std::cerr << "Server internal error\n";
+                return;
+            case STATUS_WRONG_PATH:
+                std::cerr << "Wrong file path\n";
+                return;
+            case STATUS_FILE_TOO_LONG:
+                std::cerr << "File too long\n";
+                return;
+            case STATUS_OK:
+                std::cout << "Complete in: " << globalEnd.tv_sec - globalStart.tv_sec << " sec\n";
+                break;
+            default:
+                std::cerr << "Unknown status: " << serverStatus << "\n";
+                return;
+        }
         close(fd);
         close(file);
 

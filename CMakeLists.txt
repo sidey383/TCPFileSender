@@ -3,10 +3,6 @@ project(TCPFile)
 
 set(CMAKE_CXX_STANDARD 17)
 
-add_executable(tcpServer src/tcpFileServer.cpp tcp/tcpServer.cpp tcp/tcpError.cpp tcp/tcpHolder.cpp)
+add_executable(tcpServer src/tcpFileServer.cpp tcp/tcp.cpp tcp/tcpHolder.cpp tcp/tcpServer.cpp)
 
-add_executable(tcpClient src/tcpFileClient.cpp tcp/tcpClient.cpp tcp/tcpError.cpp tcp/tcpHolder.cpp)
-
-add_executable(tcpTestServer src/tcpTestServer.cpp tcp/tcpServer.cpp tcp/tcpError.cpp tcp/tcpHolder.cpp)
-
-add_executable(tcpTestClient src/tcpTestClient.cpp tcp/tcpClient.cpp tcp/tcpError.cpp tcp/tcpHolder.cpp)
+add_executable(tcpClient src/tcpFileClient.cpp tcp/tcp.cpp tcp/tcpHolder.cpp tcp/tcpClient.cpp)
