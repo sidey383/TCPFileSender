@@ -2,10 +2,9 @@
 #define LAB2_TCP_H
 #include <sys/socket.h>
 #include <netinet/in.h>
-//#include <arpa/inet.h>
-//#include <cstring>
 #include <exception>
 #include <string>
+#include <utility>
 
 int setSocketTimeout(int socketFd, struct timeval timeout);
 
@@ -18,9 +17,9 @@ private:
     std::string reason;
 public:
 
-    ConnectionException(std::string reason) : reason(reason) {}
+    explicit ConnectionException(std::string reason) : reason(std::move(reason)) {}
 
-    ConnectionException(const char *reason) : reason(reason) {}
+    explicit ConnectionException(const char *reason) : reason(reason) {}
 
     const char *what() const noexcept override {
         return reason.c_str();

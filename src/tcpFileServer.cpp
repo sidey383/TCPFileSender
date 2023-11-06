@@ -10,13 +10,13 @@
 class ConnectionAcceptor {
 private:
     int socket;
-    int file;
+    int file{};
     struct {
         size_t fileSize;
         char fileName[NAME_SIZE];
-    } header;
+    } header{};
 
-    int validateFileName(const char *str) {
+    static int validateFileName(const char *str) {
         size_t strSize = 0;
         while (strSize < NAME_SIZE) {
             if (str[strSize] == 0) {
@@ -52,7 +52,7 @@ private:
         return STATUS_OK;
     }
 
-    int readFile() {
+    int readFile() const {
         struct timeval globalStart{};
         gettimeofday(&globalStart, nullptr);
         size_t totalRead = 0;
@@ -94,21 +94,17 @@ private:
         return 1;
     }
 
-    int sendStatus(int status) {
+    int sendStatus(int status) const {
         try {
-            std::cout << "[" << getpid() << "] Send status " << status << "\n";
-            std::flush(std::cout);
             sendSocket(socket, &status, sizeof(int));
             return 1;
         } catch (ConnectionException &e) {
-            std::cerr << "[" << getpid() << "] Send header status error: " << e.what() << "\n";
+            std::cerr << "[" << getpid() << "] Send status error: " << e.what() << "\n";
             return 0;
         }
     }
 
     int openFile() {
-        struct timeval stop{}, start{};
-        gettimeofday(&start, nullptr);
         struct stat dirStat{};
         if (stat("uploads", &dirStat) != 0) {
             if (mkdir("uploads", S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH) != 0) {
@@ -121,9 +117,6 @@ private:
                 return STATUS_INTERNAL_ERROR;
             }
         }
-        gettimeofday(&stop, nullptr);
-        std::cout << "Read stats in " + getTimeDifStr(&start, &stop) << "\n";
-        gettimeofday(&start, nullptr);
         std::string path = "uploads/";
         path += header.fileName;
         file = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC);
@@ -131,13 +124,11 @@ private:
             std::cerr << "[" << getpid() << "] File open error: " << strerror(errno) << "\n";
             return 0;
         }
-        gettimeofday(&stop, nullptr);
-        std::cout << "Open file in " + getTimeDifStr(&start, &stop) << "\n";
         return STATUS_OK;
     }
 
 public:
-    ConnectionAcceptor(int socket) : socket(socket) {}
+    explicit ConnectionAcceptor(int socket) : socket(socket), file(0), header({0, ""}) {}
 
     void acceptFile() {
         int status;
@@ -180,7 +171,7 @@ void FileTCPServer::acceptor(int in, address_t address) {
               << "\n";
 
     setSocketTimeout(in, timeout);
-    ConnectionAcceptor connectionAcceptor = ConnectionAcceptor(in);
+    auto connectionAcceptor = ConnectionAcceptor(in);
     connectionAcceptor.acceptFile();
 }
 

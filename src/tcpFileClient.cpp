@@ -75,19 +75,19 @@ void FileTCPClient::writeFile(int socket, int file, size_t size) {
     char buf[BUF_SIZE];
     size_t totalSend = 0;
     puts("Start write file");
-    struct timeval globalStart;
-    gettimeofday(&globalStart, NULL);
+    struct timeval globalStart{};
+    gettimeofday(&globalStart, nullptr);
     while (totalSend < size) {
-        struct timeval stop, start;
-        gettimeofday(&start, NULL);
-        gettimeofday(&stop, NULL);
-        ssize_t curSend = 0;
+        struct timeval stop{}, start{};
+        gettimeofday(&start, nullptr);
+        gettimeofday(&stop, nullptr);
+        size_t curSend = 0;
         while (getMicroseconds(&start, &stop) < TIME_TO_UPDATE && totalSend < size) {
             size_t curRead = read(file, buf, BUF_SIZE);
             sendSocket(socket, buf, curRead);
             totalSend += curRead;
             curSend += curRead;
-            gettimeofday(&stop, NULL);
+            gettimeofday(&stop, nullptr);
         }
         std::cout << "Status " << totalSend * 100 / size << "% at "
                   << getTimeDifStr(&globalStart, &stop) << " sec\n"

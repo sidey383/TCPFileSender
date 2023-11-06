@@ -11,11 +11,11 @@ class FileTCPClient : public TCPClient {
 private:
     struct timeval timeout;
 
-    int acceptServerStatus(int status);
+    static int acceptServerStatus(int status);
 
-    int sendHeader(int fd, size_t fSize, char* sendName);
+    static int sendHeader(int fd, size_t fSize, char* sendName);
 
-    void writeFile(int socket, int file, size_t size);
+    static void writeFile(int socket, int file, size_t size);
 
 public:
 
